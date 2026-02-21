@@ -2434,3 +2434,10 @@ int bark_get_audio_data_size(bark_context * bctx) {
         return 0;
     return bctx->n_generated_samples;
 }
+
+std::vector<float> bark_generated_audio(bark_context *bctx) {
+	if (!bctx->generated_audio || !bctx->n_generated_samples) {
+		return {};
+	}	
+	return {bctx->generated_audio, bctx->generated_audio+bctx->n_generated_samples-1};
+}

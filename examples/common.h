@@ -19,6 +19,10 @@ struct bark_params {
 	int play = -1;								// Play audio
 };
 
+struct bark_context;
+
+std::vector<float> bark_generated_audio(bark_context *bctx);
+
 /**
  * @brief Writes a WAV file from disk and stores the audio data in a vector of floats.
  *
