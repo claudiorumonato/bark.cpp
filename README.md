@@ -1,8 +1,6 @@
 # bark.cpp
 
-Fork of [ggerganov's bark.cpp](https://github.com/ggerganov/bark.cpp)
-
-[Original README](https://github.com/ggerganov/bark.cpp/blob/main/README.md)
+Fork of ggerganov's bark.cpp - [Original README](https://github.com/ggerganov/bark.cpp/blob/main/README.md)
 
 ## What I did
 
