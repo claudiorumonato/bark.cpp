@@ -1,257 +1,218 @@
-#include <map>
-#include <random>
-#include <thread>
-#include <vector>
+/*
+╞══════════════════════════════════════════════════════════════════════════════╡
+│ Copyright 2024 Pierre-Antoine Bannier                                        │
+│                                                                              │
+│ Permission to use, copy, modify, and/or distribute this software for         │
+│ any purpose with or without fee is hereby granted, provided that the         │
+│ above copyright notice and this permission notice appear in all copies.      │
+│                                                                              │
+│ THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL                │
+│ WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED                │
+│ WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE             │
+│ AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL         │
+│ DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR        │
+│ PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER               │
+│ TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR             │
+│ PERFORMANCE OF THIS SOFTWARE.                                                │
+╚─────────────────────────────────────────────────────────────────────────────*/
+#pragma once
 
+#define BARK_API
+
+#include <inttypes.h>
 #include "ggml-backend.h"
-#include "ggml.h"
 
-enum class bark_verbosity_level {
-    LOW = 0,
-    MEDIUM = 1,
-    HIGH = 2,
-};
 
-typedef int32_t bark_token;
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-typedef std::vector<int32_t> bark_sequence;
-typedef std::vector<std::vector<int32_t>> bark_codes;
+    enum bark_verbosity_level {
+        LOW    = 0,
+        MEDIUM = 1,
+        HIGH   = 2,
+    };
 
-struct gpt_hparams {
-    int32_t n_in_vocab;
-    int32_t n_out_vocab;
-    int32_t n_layer;
-    int32_t n_head;
-    int32_t n_embd;
-    int32_t block_size;
-    int32_t n_lm_heads;
-    int32_t n_wtes;
-    int32_t ftype;
-    int32_t bias;
+    enum bark_encoding_step {
+        SEMANTIC = 0,
+        COARSE   = 1,
+        FINE     = 2,
+    };
 
-    int32_t n_codes_given = 1;
-};
+    struct bark_context;
+    struct bark_model;
 
-struct bark_vocab {
-    using id = int32_t;
-    using token = std::string;
+    // Holds the vocabulary for the semantic encoder
+    struct bark_vocab;
 
-    std::map<token, id> token_to_id;
-    std::map<id, token> id_to_token;
-};
+    // Define the GPT architecture for the 3 encoders
+    struct gpt_model;
 
-struct gpt_layer {
-    // normalization
-    struct ggml_tensor *ln_1_g;
-    struct ggml_tensor *ln_1_b;
+    typedef void (*bark_progress_callback)(struct bark_context * bctx, enum bark_encoding_step step, int progress, void * user_data);
 
-    struct ggml_tensor *ln_2_g;
-    struct ggml_tensor *ln_2_b;
+    struct bark_context_params {
+        // Verbosity level
+        enum bark_verbosity_level verbosity;
 
-    // attention
-    struct ggml_tensor *c_attn_attn_w;
-    struct ggml_tensor *c_attn_attn_b;
+        // Temperature for sampling (text and coarse encoders)
+        float temp;
+        // Temperature for sampling (fine encoder)
+        float fine_temp;
 
-    struct ggml_tensor *c_attn_proj_w;
-    struct ggml_tensor *c_attn_proj_b;
+        // Minimum probability for EOS token (text encoder)
+        float min_eos_p;
+        // Sliding window size for coarse encoder
+        int32_t sliding_window_size;
+        // Max history for coarse encoder
+        int32_t max_coarse_history;
 
-    // mlp
-    struct ggml_tensor *c_mlp_fc_w;
-    struct ggml_tensor *c_mlp_fc_b;
+        // Sample rate
+        int32_t sample_rate;
+        // Target bandwidth
+        int32_t target_bandwidth;
 
-    struct ggml_tensor *c_mlp_proj_w;
-    struct ggml_tensor *c_mlp_proj_b;
-};
+        // CLS token ID
+        int32_t cls_token_id;
+        // SEP token ID
+        int32_t sep_token_id;
 
-struct gpt_model {
-    gpt_hparams hparams;
+        // Maximum number of semantic tokens to generate
+        int32_t n_steps_text_encoder;
 
-    // normalization
-    struct ggml_tensor *ln_f_g;
-    struct ggml_tensor *ln_f_b;
+        // Text PAD token ID
+        int32_t text_pad_token;
+        // Text encoding offset
+        int32_t text_encoding_offset;
 
-    struct ggml_tensor *wpe;                     //  position embedding
-    std::vector<struct ggml_tensor *> wtes;      //     token embedding
-    std::vector<struct ggml_tensor *> lm_heads;  // language model head
+        // Semantic frequency rate
+        float semantic_rate_hz;
+        // Semantic PAD token ID
+        int32_t semantic_pad_token;
+        // Vocabulary size in semantic encoder
+        int32_t semantic_vocab_size;
+        // Semantic infernce token ID
+        int32_t semantic_infer_token;
 
-    std::vector<gpt_layer> layers;
+        // Coarse frequency rate
+        float coarse_rate_hz;
+        // Coarse infer token ID
+        int32_t coarse_infer_token;
+        // Coarse semantic pad token ID
+        int32_t coarse_semantic_pad_token;
 
-    // key + value memory
-    struct ggml_tensor *memory_k;
-    struct ggml_tensor *memory_v;
+        // Number of codebooks in coarse encoder
+        int32_t n_coarse_codebooks;
+        // Number of codebooks in fine encoder
+        int32_t n_fine_codebooks;
+        // Dimension of the codes
+        int32_t codebook_size;
 
-    struct ggml_context *ctx;
+        // called on each progress update
+        bark_progress_callback progress_callback;
+        void * progress_callback_user_data;
+    };
 
-    ggml_backend_t backend = NULL;
+    /**
+     * @brief Returns the default parameters for a bark context.
+     *
+     * @return bark_context_params The default parameters for a bark context.
+     */
+    BARK_API struct bark_context_params bark_context_default_params(void);
 
-    ggml_backend_buffer_t buffer_w;
-    ggml_backend_buffer_t buffer_kv;
+    /**
+     * Loads a Bark model from the specified file path with the given parameters.
+     *
+     * @param model_path The directory path of the bark model to load.
+     * @param params     The parameters to use for the Bark model.
+     * @param seed       The seed to use for random number generation.
+     * @return A pointer to the loaded bark model context.
+     */
+    BARK_API struct bark_context *bark_load_model(
+        const char *model_path,
+        const struct bark_context_params &params,
+        uint32_t seed,
+		int use_gpu = 0);
 
-    std::map<std::string, struct ggml_tensor *> tensors;
+    /**
+     * Generates an audio file from the given text using the specified Bark context.
+     *
+     * @param bctx The Bark context to use for generating the audio.
+     * @param text The text to generate audio from.
+     * @param n_threads The number of threads to use for generating the audio.
+     * @param voice Tokens for voice conditioning.
+     * @return An integer indicating the success of the audio generation process.
+     */
+    BARK_API bool bark_generate_audio(
+        struct bark_context *bctx,
+        const char *text,
+        int n_threads);
 
-    //
-    int64_t t_sample_us = 0;
-    int64_t t_predict_us = 0;
-    int64_t t_main_us = 0;
+    /**
+     * Retrieves the audio data generated by the Bark context.
+     *
+     * @param bctx The Bark context to use for generating the audio.
+     * @return A pointer to the audio data generated by the Bark context.
+     */
+    BARK_API float *bark_get_audio_data(
+        struct bark_context *bctx);
 
-    //
-    int64_t n_sample = 0;
+    /**
+     * Retrieves the audio data generated by the Bark context.
+     *
+     * @param bctx The Bark context to use for generating the audio.
+     * @return The size of the audio data generated by the Bark context.
+     */
+    BARK_API int bark_get_audio_data_size(
+        struct bark_context *bctx);
 
-    //
-    int64_t memsize = 0;
-};
+    /**
+     * Retrieves the load time of the last audio generation round.
+     *
+     * @param bctx The Bark context to use for generating the audio.
+     * @return A struct containing the statistics of the last audio generation round.
+     */
+    /*BARK_API int64_t bark_get_load_time(
+        struct bark_context *bctx);*/
 
-struct bark_model {
-    // encoder
-    gpt_model coarse_model;
-    gpt_model fine_model;
-    gpt_model text_model;
+    /**
+     * Retrieves the evaluation time of the last audio generation round.
+     *
+     * @param bctx The Bark context to use for generating the audio.
+     * @return A struct containing the statistics of the last audio generation round.
+     */
+    /*BARK_API int64_t bark_get_eval_time(
+        struct bark_context *bctx);*/
 
-    // vocab
-    bark_vocab vocab;
-};
+    /**
+     * Reset the statistics of the last audio generation round.
+     *
+     * @param bctx The Bark context to use for generating the audio.
+     * @return A struct containing the statistics of the last audio generation round.
+     */
+    BARK_API void bark_reset_statistics(
+        struct bark_context *bctx);
 
-struct bark_context_params {
-    // RNG seed
-    uint32_t seed;
-    // Verbosity level
-    bark_verbosity_level verbosity;
+    /**
+     * Quantizes a bark model and saves the result to a file.
+     *
+     * @param fname_inp The name of the input file containing the BARK model.
+     * @param fname_out The name of the output file to save the quantized model to.
+     * @param ftype The type of the model's floating-point values.
+     * @return True if the model was successfully quantized and saved, false otherwise.
+     */
+    BARK_API bool bark_model_quantize(
+        const char *fname_inp,
+        const char *fname_out,
+        enum ggml_ftype ftype);
 
-    // Temperature for sampling (text and coarse encoders)
-    float temp;
-    // Temperature for sampling (fine encoder)
-    float fine_temp;
+    /**
+     * @brief Frees the memory allocated for a bark context.
+     *
+     * @param bctx The bark context to free.
+     */
+    BARK_API void bark_free(
+        struct bark_context *bctx);
 
-    // Minimum probability for EOS token (text encoder)
-    float min_eos_p;
-    // Sliding window size for coarse encoder
-    int32_t sliding_window_size;
-    // Max history for coarse encoder
-    int32_t max_coarse_history;
-
-    // Sample rate
-    int32_t sample_rate;
-    // Target bandwidth
-    int32_t target_bandwidth;
-
-    // CLS token ID
-    int32_t cls_token_id;
-    // SEP token ID
-    int32_t sep_token_id;
-
-    // Maximum number of semantic tokens to generate
-    int32_t n_steps_text_encoder;
-
-    // Text PAD token ID
-    int32_t text_pad_token;
-    // Text encoding offset
-    int32_t text_encoding_offset;
-
-    // Semantic frequency rate
-    float semantic_rate_hz;
-    // Semantic PAD token ID
-    int32_t semantic_pad_token;
-    // Vocabulary size in semantic encoder
-    int32_t semantic_vocab_size;
-    // Semantic infernce token ID
-    int32_t semantic_infer_token;
-
-    // Coarse frequency rate
-    float coarse_rate_hz;
-    // Coarse infer token ID
-    int32_t coarse_infer_token;
-    // Coarse semantic pad token ID
-    int32_t coarse_semantic_pad_token;
-
-    // Number of codebooks in coarse encoder
-    int32_t n_coarse_codebooks;
-    // Number of codebooks in fine encoder
-    int32_t n_fine_codebooks;
-    // Dimension of the codes
-    int32_t codebook_size;
-};
-
-struct bark_context {
-    bark_model model;
-
-    // buffer for model evaluation
-    ggml_backend_buffer_t buf_compute;
-
-    // custom allocator
-    struct ggml_allocr *allocr = NULL;
-    int n_gpu_layers = 0;
-
-    std::mt19937 rng;
-
-    bark_sequence tokens;
-    bark_sequence semantic_tokens;
-
-    bark_codes coarse_tokens;
-    bark_codes fine_tokens;
-
-    std::vector<float> audio_arr;
-
-    // hyperparameters
-    bark_context_params params;
-
-    // statistics
-    int64_t t_load_us = 0;
-    int64_t t_eval_us = 0;
-
-    // encodec parameters
-    std::string encodec_model_path;
-};
-
-/**
- * @brief Returns the default parameters for a bark context.
- *
- * @return bark_context_params The default parameters for a bark context.
- */
-struct bark_context_params bark_context_default_params(void);
-
-/**
- * Loads a BARK model from the specified file path with the given parameters.
- *
- * @param model_path The directory path of the bark model to load.
- * @param verbosity  The verbosity level when loading the model.
- * @return A pointer to the loaded bark model context.
- */
-struct bark_context *bark_load_model(
-    const std::string &model_path,
-    bark_verbosity_level verbosity);
-
-/**
- * Generates an audio file from the given text using the specified Bark context.
- *
- * @param bctx The Bark context to use for generating the audio.
- * @param text The text to generate audio from.
- * @param dest_wav_path The path to save the generated audio file.
- * @param n_threads The number of threads to use for generating the audio.
- * @return An integer indicating the success of the audio generation process.
- */
-bool bark_generate_audio(
-    bark_context *bctx,
-    std::string &text,
-    std::string &dest_wav_path,
-    int n_threads);
-
-/**
- * Quantizes a bark model and saves the result to a file.
- *
- * @param fname_inp The name of the input file containing the BARK model.
- * @param fname_out The name of the output file to save the quantized model to.
- * @param ftype The type of the model's floating-point values.
- * @return True if the model was successfully quantized and saved, false otherwise.
- */
-bool bark_model_quantize(
-    const std::string &fname_inp,
-    const std::string &fname_out,
-    ggml_ftype ftype);
-
-/**
- * @brief Frees the memory allocated for a bark context.
- *
- * @param bctx The bark context to free.
- */
-void bark_free(
-    struct bark_context *bctx);
+#ifdef __cplusplus
+}
+#endif
