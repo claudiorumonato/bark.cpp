@@ -19,5 +19,7 @@ The original implementation of `bark.cpp` is the bark's 24Khz English model. We 
 ## Usage
 
 Build and install somewhere the [latest GGML](https://github.com/ggml-org/ggml).
+
 Build the [fixed encoder.cpp](https://github.com/claudiorumonato/encodec.cpp).
+
 Build [bark.cpp](https://github.com/claudiorumonato/bark.cpp) as shown in build.bat.
