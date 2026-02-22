@@ -16,6 +16,8 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/")
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+set(CMAKE_PREFIX_PATH "${GGML_DIST}/${CMAKE_BUILD_TYPE}")
+
 if (MSVC)
 	set(LIB_EXT ".lib")
     if (CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -29,6 +31,25 @@ else()
 	set(LIB_EXT ".a")
 endif()
 
+set(ENCODEC_LIB encodec)
+
+add_library(
+    ${ENCODEC_LIB}
+    encodec/encodec.cpp
+    encodec/encodec.h
+    encodec/encoder.h
+    encodec/decoder.h
+    encodec/quantizer.h
+    encodec/ops.cpp
+    encodec/ops.h
+    encodec/utils.h
+    encodec/lstm.h
+)
+
+target_link_libraries(${ENCODEC_LIB} PUBLIC ggml)
+target_include_directories(${ENCODEC_LIB} PUBLIC .)
+target_compile_features(${ENCODEC_LIB} PUBLIC cxx_std_11)
+
 set(BARK_LIB bark)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
@@ -37,6 +58,7 @@ else()
     set(BARK_STANDALONE OFF)
 endif()
 
+option(BUILD_SHARED_LIBS       "bark: build shared libraries" OFF)
 option(BARK_BUILD_EXAMPLES     "bark: build examples" ${BARK_STANDALONE})
 
 find_package(ggml REQUIRED)
@@ -47,10 +69,10 @@ add_library(ggml ALIAS ggml::ggml)
 
 add_library(${BARK_LIB} STATIC bark.cpp bark.h)
 
+target_link_libraries(${BARK_LIB} PUBLIC ggml encodec)
+target_include_directories(${BARK_LIB} PUBLIC . encodec)
+target_compile_features(${BARK_LIB} PUBLIC cxx_std_11)
+
 if (BARK_BUILD_EXAMPLES)
     add_subdirectory(examples)
 endif()
-
-target_link_libraries(${BARK_LIB} PUBLIC ggml ${encodec_BUILD}/encodec${LIB_EXT})
-target_include_directories(${BARK_LIB} PUBLIC . ${encodec_BUILD}/../..)
-target_compile_features(${BARK_LIB} PUBLIC cxx_std_11)
